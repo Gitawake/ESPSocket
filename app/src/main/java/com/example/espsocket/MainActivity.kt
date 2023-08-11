@@ -32,14 +32,19 @@ import java.io.InputStreamReader
 import java.io.PrintWriter
 import java.net.Socket
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.net.SocketTimeoutException
+import java.text.DateFormat
+import java.util.Date
+import java.util.Locale
 
 data class UiState(
     var connectState: String,
     var messageState: String
 )
 
-val uiState = UiState("连接断开", "")
+val uiState = UiState("not connected", "")
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,7 +56,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ESPRemoteControl(viewModel = MyViewModel())
+                    ESPRemoteControl(viewModel = SocketViewModel())
                 }
             }
         }
@@ -61,179 +66,115 @@ class MainActivity : ComponentActivity() {
 class SocketClient {
     private var serverIP = "192.168.31.237"
     private var serverPort = 1212 // 服务器端口号
+
+    private val socketMutex = Mutex()
     private var socket: Socket? = null
 
-    fun connectToServer(): String {
-        var isSuccessfullyConnected = ""
-
-        try {
+    private fun connectToServerInternal(): Boolean {
+        return try {
             socket = Socket(serverIP, serverPort)
-            socket?.let { socket ->
-                val timeoutMillis = 5000 // 5秒的超时等待时间
-                socket.soTimeout = timeoutMillis
-
-                println("Socket 初始化...")
-                try {
-                    println("往服务端发送消息...")
-                    val outputStream = socket.getOutputStream()
-                    val writer = PrintWriter(outputStream, true)
-                    writer.println("Hello!")
-                    println("往服务端发送消息...OK")
-
-                    println("等待服务端返回消息...")
-                    val inputStream = socket.getInputStream()
-                    val reader = BufferedReader(InputStreamReader(inputStream))
-                    val response = reader.readLine()
-                    println("等待服务端返回消息...OK")
-                    // 处理服务器的响应
-                    println("服务器返回的消息: $response")
-
-                    // 如果收到了预期的服务器响应，说明连接正常
-                    if (response == "OK&Hello!") {
-                        isSuccessfullyConnected = "已连接..."
-                        println("已成功连接服务端...")
-                    } else {
-                        isSuccessfullyConnected = "连接失败...!"
-                        println("连接服务端失败...!")
-                    }
-                } catch (e: SocketTimeoutException) {
-                    e.printStackTrace()
-                    isSuccessfullyConnected = "连接超时...!"
-                    println("连接超时...!")
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    isSuccessfullyConnected = "连接失败...!"
-                    println("连接服务端失败...!")
-                }
-            }
-
+            true
         } catch (e: Exception) {
             e.printStackTrace()
-            isSuccessfullyConnected = "连接失败...!"
-            println("连接服务端失败...!")
+            false
         }
-
-        return isSuccessfullyConnected
     }
 
-
-    fun sendHeartBeat(message: String): String {
-        var heartBeatMessage = ""
+    private fun sendInternal(message: String): String {
+        var response = ""
+        val timeoutMillis = 5000 // 5秒的超时等待时间
         socket?.let { socket ->
-            val timeoutMillis = 5000 // 5秒的超时等待时间
             socket.soTimeout = timeoutMillis
             try {
-                println("往服务端发送心跳...")
                 val outputStream = socket.getOutputStream()
                 val writer = PrintWriter(outputStream, true)
                 writer.println(message)
-                println("往服务端发送心跳...OK")
 
-                println("等待服务端返回心跳...")
                 val inputStream = socket.getInputStream()
                 val reader = BufferedReader(InputStreamReader(inputStream))
-                val response = reader.readLine()
-                println("等待服务端返回心跳...OK")
-                // 处理服务器的响应
-                heartBeatMessage = response
+                response = reader.readLine()
             } catch (e: SocketTimeoutException) {
+                response = "message timeout"
                 e.printStackTrace()
-                heartBeatMessage = "心跳超时...!"
-                println("心跳超时...!")
-            }catch (e: Exception) {
-                heartBeatMessage = "心跳失败...!"
-                println("心跳失败...!")
+            } catch (e: Exception) {
+                response = "Message failed"
                 e.printStackTrace()
             }
         }
-        return heartBeatMessage
+        return response
     }
 
-    fun sendMessage(message: String): String {
-        var inMessage = ""
-        socket?.let { socket ->
-            val timeoutMillis = 5000 // 5秒的超时等待时间
-            socket.soTimeout = timeoutMillis
-            try {
-                println("message:$message")
-                println("往服务端发送消息...")
-                val outputStream = socket.getOutputStream()
-                val writer = PrintWriter(outputStream, true)
-                writer.println(message)
-                println("往服务端发送消息...OK")
-
-                println("等待服务端返回消息...")
-                val inputStream = socket.getInputStream()
-                val reader = BufferedReader(InputStreamReader(inputStream))
-                val response = reader.readLine()
-                println("等待服务端返回消息...OK")
-                // 处理服务器的响应
-                println("服务器返回的消息: $response")
-                inMessage = response
-            } catch (e: SocketTimeoutException) {
-                e.printStackTrace()
-                inMessage = "连接超时...!"
-                println("连接超时...!")
-            }catch (e: Exception) {
-                inMessage = "连接失败...!"
-                println("连接失败...!")
-                e.printStackTrace()
-            }
+    suspend fun connectToServer(): Boolean {
+        return socketMutex.withLock {
+            connectToServerInternal()
         }
-        return inMessage
     }
 
-    fun disconnect(): String {
-        val inState = "连接断开"
-        socket?.close()
-        println(inState)
-        return inState
+    suspend fun sendMessage(message: String): String {
+        return socketMutex.withLock {
+            sendInternal(message)
+        }
+    }
+
+    suspend fun disconnect() {
+        socketMutex.withLock {
+            socket?.close()
+        }
     }
 }
 
-val socketClient = SocketClient()
 
-class MyViewModel : ViewModel() {
+
+class SocketViewModel : ViewModel() {
     var state by mutableStateOf(uiState)
-
+    private val socketClient = SocketClient()
     private val heartBeatInterval = 3000L // 3秒，心跳间隔时间
     private var heartBeatJob: Job? = null
 
+    private fun formatTimestamp(): String {
+        val currentTimeMillis = System.currentTimeMillis()
+        val dateTimeFormatter =
+            DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, Locale.US)
+        return dateTimeFormatter.format(Date(currentTimeMillis))
+    }
+
     fun connectToServerAndUpdateState() {
         viewModelScope.launch(Dispatchers.IO) {
-            val result = socketClient.connectToServer() // 替换为实际的异步任务
-            if (result == "已连接...") {
-                startHeartBeat()
+            val initialization = socketClient.connectToServer()
+            if (initialization) {
+                val dateTime = formatTimestamp()
+                val callback = socketClient.sendMessage("$dateTime -- Holle,Socket!")
+                if (callback == "OK&$dateTime -- Holle,Socket!") {
+                    state = state.copy(connectState = "Success connect")
+                    startHeartBeat()
+                }
             }
-            state = state.copy(connectState = result)// 更新 connectState 字段
         }
     }
 
     fun sendMessageAndUpdateState(message: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val result = socketClient.sendMessage(message) // 替换为实际的异步任务
-            state = state.copy(messageState = result)// 更新 messageState 字段
+            val callback = socketClient.sendMessage(message) // 替换为实际的异步任务
+            state = state.copy(messageState = callback)// 更新 messageState 字段
         }
     }
 
     fun disconnectAndUpdateState() {
         viewModelScope.launch(Dispatchers.IO) {
             heartBeatJob?.cancel()
-            val result = socketClient.disconnect() // 替换为实际的异步任务
-            state = state.copy(connectState = result)// 更新 connectState 字段
+            socketClient.disconnect() // 替换为实际的异步任务
+            state = state.copy(connectState = "connection closed") // 更新 connectState 字段
         }
     }
 
-
-    fun startHeartBeat() {
+    private fun startHeartBeat() {
         if (heartBeatJob?.isActive != true) {
             heartBeatJob = viewModelScope.launch(Dispatchers.IO) {
                 while (isActive) {
-                    val currentTime = System.currentTimeMillis()
-                    val result = socketClient.sendHeartBeat("heartbeat $currentTime")
-                    if (result != "OK&heartbeat $currentTime") {
-                        heartBeatJob?.cancel()
-                        state = state.copy(connectState = "心跳失败")// 更新 connectState 字段
+                    val dateTime = formatTimestamp()
+                    val callback = socketClient.sendMessage("$dateTime -- heartbeat")
+                    if (callback != "OK&$dateTime -- heartbeat") {
+                        disconnectAndUpdateState()
                     }
                     delay(heartBeatInterval)
                 }
@@ -244,33 +185,26 @@ class MyViewModel : ViewModel() {
 
 
 @Composable
-fun ESPRemoteControl(modifier: Modifier = Modifier, viewModel: MyViewModel) {
+fun ESPRemoteControl(modifier: Modifier = Modifier, viewModel: SocketViewModel) {
 
     val state = viewModel.state
 
     Column {
         Text(
-            text = state.connectState + state.messageState,
+            text = state.connectState + " ->" + state.messageState,
             modifier = modifier
         )
         Row {
             Button(
                 onClick = {
-                    if (state.connectState != "已连接...") {
+                    if (state.connectState != "Success connect")
                         viewModel.connectToServerAndUpdateState()
-                    } else {
+                    else
                         viewModel.disconnectAndUpdateState()
-                    }
-                    println("连接按钮被按下...")
-
                 }
             ) {
                 Text(
-                    text = if (state.connectState != "已连接...") {
-                        "连接"
-                    } else {
-                        "断开"
-                    }
+                    text = if (state.connectState != "Success connect") "Connect" else "Closed"
                 )
             }
         }
@@ -291,7 +225,7 @@ fun ESPRemoteControl(modifier: Modifier = Modifier, viewModel: MyViewModel) {
 }
 
 @Composable
-fun ButtonX(text: String, message: String, viewModel: MyViewModel) {
+fun ButtonX(text: String, message: String, viewModel: SocketViewModel) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
@@ -317,7 +251,7 @@ fun ButtonX(text: String, message: String, viewModel: MyViewModel) {
 @Composable
 fun ESPRemoteControlPreview() {
     ESPSocketTheme {
-        ESPRemoteControl(viewModel = MyViewModel())
+        ESPRemoteControl(viewModel = SocketViewModel())
     }
 }
 
