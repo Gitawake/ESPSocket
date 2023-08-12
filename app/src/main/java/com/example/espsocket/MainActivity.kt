@@ -214,22 +214,22 @@ fun ESPRemoteControl(modifier: Modifier = Modifier, viewModel: SocketViewModel) 
         }
         Row {
             Column {
-                ButtonX("右前", "1F", viewModel)
+                ControlButtons("右前", "1F", viewModel)
 
-                ButtonX("右后", "1A", viewModel)
+                ControlButtons("右后", "1A", viewModel)
             }
             Spacer(modifier = Modifier.weight(1f))
             Column {
-                ButtonX("左前", "2F", viewModel)
+                ControlButtons("左前", "2F", viewModel)
 
-                ButtonX("左后", "2A", viewModel)
+                ControlButtons("左后", "2A", viewModel)
             }
         }
     }
 }
 
 @Composable
-fun ButtonX(text: String, message: String, viewModel: SocketViewModel) {
+fun ControlButtons(text: String, message: String, viewModel: SocketViewModel) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
