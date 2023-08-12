@@ -147,7 +147,11 @@ class SocketViewModel : ViewModel() {
                 if (callback == "OK&$dateTime -- Holle,Socket!") {
                     state = state.copy(connectState = "Success connect")
                     startHeartBeat()
+                }else{
+                    state = state.copy(connectState = "connect failed")
                 }
+            }else{
+                state = state.copy(connectState = "connect failed")
             }
         }
     }
