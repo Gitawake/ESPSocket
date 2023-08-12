@@ -41,10 +41,11 @@ import java.util.Locale
 
 data class UiState(
     var connectState: String,
-    var messageState: String
+    var messageState: String,
+    var connectButtonState: Boolean
 )
 
-val uiState = UiState("not connected", "")
+val uiState = UiState("not connected", "",true)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,8 +85,8 @@ class SocketClient {
         var response = ""
         val timeoutMillis = 5000 // 5秒的超时等待时间
         socket?.let { socket ->
-            socket.soTimeout = timeoutMillis
             try {
+                socket.soTimeout = timeoutMillis
                 val outputStream = socket.getOutputStream()
                 val writer = PrintWriter(outputStream, true)
                 writer.println(message)
@@ -140,6 +141,7 @@ class SocketViewModel : ViewModel() {
 
     fun connectToServerAndUpdateState() {
         viewModelScope.launch(Dispatchers.IO) {
+            state = state.copy(connectButtonState = false)
             val initialization = socketClient.connectToServer()
             if (initialization) {
                 val dateTime = formatTimestamp()
@@ -153,6 +155,7 @@ class SocketViewModel : ViewModel() {
             }else{
                 state = state.copy(connectState = "connect failed")
             }
+            state = state.copy(connectButtonState = true)
         }
     }
 
@@ -205,7 +208,8 @@ fun ESPRemoteControl(modifier: Modifier = Modifier, viewModel: SocketViewModel) 
                         viewModel.connectToServerAndUpdateState()
                     else
                         viewModel.disconnectAndUpdateState()
-                }
+                },
+                enabled = state.connectButtonState
             ) {
                 Text(
                     text = if (state.connectState != "Success connect") "Connect" else "Closed"
